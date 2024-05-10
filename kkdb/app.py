@@ -18,7 +18,7 @@ GlobalHydra.instance().clear()
 # Setup logger
 now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 logger.add(
-    sink=f"./logs/webapp_{now}.log",
+    sink="./logs/webapp.log",
     rotation="1 day",
     retention="7 days",
     enqueue=True,

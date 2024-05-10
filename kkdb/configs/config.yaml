@@ -9,3 +9,11 @@ proxy:
 
 output:
   dir: "./logs/"
+
+datasource:
+  timezone: Asia/Shanghai
+  crypto: true
+  cn_share: true
+  us_share: true
+  hk_share: true
+  fund: true

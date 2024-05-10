@@ -1,0 +1,11 @@
+defaults:
+  - _self_
+  - db: mongodb
+
+proxy:
+  http: http://localhost:7890
+  https: http://localhost:7890
+  socks5: socks5://localhost:7890
+
+output:
+  dir: "./logs/"

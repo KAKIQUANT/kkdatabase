@@ -1,0 +1,25 @@
+# Config & Tools
+typing
+python-dotenv
+pandas
+seaborn
+tqdm
+python-telegram-bot
+OmegaConf
+hydra-core
+# FinData
+python-okx
+akshare
+qstock
+pywencai
+# Database
+motor
+pymongo
+# Web
+aiohttp
+fastapi
+streamlit
+
+
+
+

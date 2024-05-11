@@ -3,6 +3,7 @@ defaults:
   - db: mongodb
 
 proxy:
+  enable: false
   http: http://localhost:7890
   https: http://localhost:7890
   socks5: socks5://localhost:7890
@@ -17,3 +18,8 @@ datasource:
   us_share: true
   hk_share: true
   fund: true
+
+dns:
+  nameservers:
+    - 8.8.8.8
+    - 8.8.4.4

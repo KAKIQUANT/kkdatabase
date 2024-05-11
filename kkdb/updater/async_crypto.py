@@ -1,4 +1,5 @@
 """
+2024/05/11 为了减少数据库报错，应把更新的数据截断至数据库最后的时间，这样可以避免重复插入数据。
 Update the crypto data in MongoDB asynchronously using aiohttp and asyncio.
 Full data, and will run everyday to update the data.
 """
@@ -31,6 +32,7 @@ class AsyncCryptoDataUpdater:
         max_concurrent_requests: int = 3,
         client_str: str = "mongodb://localhost:27017",
         db_name: str = "crypto",
+        resolvers: Optional[aiohttp.resolver.AsyncResolver] = None,
     ) -> None:
         self.client = AsyncIOMotorClient(client_str)
         self.db = self.client[db_name]
@@ -47,11 +49,11 @@ class AsyncCryptoDataUpdater:
             "Referer": "https://www.okx.com/",
         }
         self.session: Optional[aiohttp.ClientSession] = None
+        self.resolver = resolvers
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(message)s",
-            handlers=[logging.FileHandler("aiocrypto.log"), logging.StreamHandler()],
         )
 
     async def drop_db(self, refresh: bool = False, db_name: str = "crypto"):
@@ -221,7 +223,7 @@ class AsyncCryptoDataUpdater:
             if self.session is not None:
                 while True:
                     async with self.session.get(
-                        self.market_url, params=params, headers=self.headers
+                        self.market_url, params=params, headers=self.headers, resolver=self.resolver
                     ) as response:
                         if response.status == 200:
                             result = await response.json()
@@ -295,7 +297,7 @@ class AsyncCryptoDataUpdater:
                 }
 
                 async with self.semaphore:
-                    if self.session != None:
+                    if self.session is not None:
                         async with self.session.get(
                             self.market_url, params=params, headers=self.headers
                         ) as response:
@@ -345,7 +347,7 @@ class AsyncCryptoDataUpdater:
                                     await self.insert_data_to_mongodb(
                                         f"kline-{bar}", df
                                     )  # Adjust as per your actual method signature
-                                    logging.info(
+                                    logging.debug(
                                         f"Successfully inserted data for {inst_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
                                     )
                                     a = np.int64(result["data"][-1][0]) - np.int64(1)

@@ -13,7 +13,7 @@ import okx.PublicData as PublicData
 from motor.motor_asyncio import AsyncIOMotorClient
 import numpy as np
 from typing import Optional, Iterable
-
+from pymongo.errors import BulkWriteError
 
 class AsyncCryptoDataUpdater:
     def __init__(
@@ -76,12 +76,15 @@ class AsyncCryptoDataUpdater:
         self, collection_name: str, data: pd.DataFrame
     ) -> None:
         if not data.empty:
-            collection = self.db[collection_name]
-            data_dict = data.to_dict("records")
-            await collection.insert_many(data_dict)  # type: ignore
-            logging.info(
-                f"Inserted {len(data_dict)} new records into {collection_name} asynchronously."
-            )
+            try:
+                collection = self.db[collection_name]
+                data_dict = data.to_dict("records")
+                await collection.insert_many(data_dict)  # type: ignore
+                logging.info(
+                    f"Inserted {len(data_dict)} new records into {collection_name} asynchronously."
+                )
+            except BulkWriteError as e:
+                logging.warning("Writing duplicate data encountered, skipping...")
 
     async def get_all_coin_pairs(self, filter: Optional[str] = None) -> list[str]:
         """
@@ -393,7 +396,7 @@ class AsyncCryptoDataUpdater:
         await asyncio.gather(*tasks)
 
     async def main(self):
-        await self.drop_db()
+        await self.drop_db(refresh=True)
         await self.setup_check_mongodb(self.db)
         await self.start_session()
         await self.initialize_update()

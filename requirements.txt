@@ -19,7 +19,8 @@ pymongo
 aiohttp
 fastapi
 streamlit
-
+aiodns
+loguru
 
 
 

@@ -396,7 +396,7 @@ class AsyncCryptoDataUpdater:
         await asyncio.gather(*tasks)
 
     async def main(self):
-        await self.drop_db(refresh=True)
+        await self.drop_db(refresh=False)
         await self.setup_check_mongodb(self.db)
         await self.start_session()
         await self.initialize_update()

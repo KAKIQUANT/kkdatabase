@@ -37,4 +37,9 @@ setup(
     project_urls={
         "Bug Tracker": "https://github.com/KAKIQUANT/kkdatabase/issues",
     },
+    entry_points={
+        'console_scripts': [
+            'kkdb=kkdb.main:main'
+        ]
+    },
 )

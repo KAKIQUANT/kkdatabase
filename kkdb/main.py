@@ -22,7 +22,7 @@ logger.add(
     diagnose=True,
 )
 
-@hydra.main(config_path="configs", config_name="config", version_base="1.2")
+@hydra.main(config_path="configs", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     logger.debug(cfg)
     nameservers = cfg.dns.nameservers

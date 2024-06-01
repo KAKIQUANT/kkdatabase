@@ -1,5 +1,5 @@
 default_db: crypto
-connection_string: "mongodb://192.168.31.218:27017"
+connection_string: "mongodb://localhost:27017"
 username: ""
 password: ""
 

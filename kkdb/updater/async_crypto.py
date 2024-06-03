@@ -14,7 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import numpy as np
 from typing import Optional, Iterable
 from pymongo.errors import BulkWriteError
-
+from kkdb.utils.check_db import get_client_str
 class AsyncCryptoDataUpdater:
     def __init__(
         self,
@@ -30,7 +30,7 @@ class AsyncCryptoDataUpdater:
             "1W",
         ],
         max_concurrent_requests: int = 3,
-        client_str: str = "mongodb://localhost:27017",
+        client_str: str = get_client_str(),
         db_name: str = "crypto",
         resolvers: Optional[aiohttp.resolver.AsyncResolver] = None,
     ) -> None:
@@ -406,4 +406,6 @@ class AsyncCryptoDataUpdater:
 
 if __name__ == "__main__":
     updater = AsyncCryptoDataUpdater()
-    asyncio.run(updater.main())
+    # asyncio.run(updater.main())
+    # Check conpound index
+    asyncio.run(updater.setup_check_mongodb(updater.db))

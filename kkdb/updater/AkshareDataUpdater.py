@@ -6,7 +6,6 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Iterable
 
-
 class AkshareDataUpdater(BaseDataUpdater):
     def __init__(
         self, db_name: str, bar_sizes: Iterable[str], client_str: str = get_client_str()
@@ -23,7 +22,7 @@ class AkshareDataUpdater(BaseDataUpdater):
                 "开盘": "open",
                 "收盘": "close",
                 "最高": "high",
-                "最低": "close",
+                "最低": "low",
                 "成交量": "volume",
                 "成交额": "total_turnover",
                 "振幅": "amplitude",
@@ -37,7 +36,10 @@ class AkshareDataUpdater(BaseDataUpdater):
         df["datetime"] = df["datetime"].apply(
             lambda x: datetime.combine(x, datetime.min.time())
         )
-
+        
+        # Drop duplicate columns
+        df = df.loc[:, ~df.columns.duplicated()]
+        
         return df
 
     def _get_stock_list(self) -> list:
@@ -55,7 +57,9 @@ class AkshareDataUpdater(BaseDataUpdater):
             stock_data_df = ak.stock_zh_a_minute(
                 symbol=stock_code, period=freq.lower(), adjust="qfq"
             )
-        return stock_data_df
+        if not stock_data_df.empty:
+            stock_data_df = self._process_df(stock_data_df)
+            self._insert_data(f"kline-{freq}", stock_data_df)
 
     def pool_download(self, stock_list: list, num_workers: int = 5):
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -67,16 +71,9 @@ class AkshareDataUpdater(BaseDataUpdater):
                         executor.submit(self._single_download, stock_code, freq=bar)
                     )
             for future in futures:
-                stock_data_df = future.result()
-                stock_data_df = self._process_df(stock_data_df)
-                self._insert_data(
-                    f'kline-{stock_data_df["freq"].iloc[0]}', stock_data_df
-                )
-
-    def main(self):
-        super().main()
+                future.result()
 
 
 if __name__ == "__main__":
     updater = AkshareDataUpdater(db_name="cn_stock", bar_sizes=["1D", "1W"])
-    updater.main()
+    updater.main(refresh=False)

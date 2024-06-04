@@ -47,7 +47,7 @@ class BaseDataUpdater(ABC):
         logger.info(f"Checking indexes for {self.db_name}...")
         for collection_name in collections:
             collection = self.db[collection_name]
-            lists_of_indexes = collection.list_indexes().to_list()
+            lists_of_indexes = [index for index in collection.list_indexes()]
             logger.info(f"Indexes for {collection_name}: {lists_of_indexes}")
             if not any(
                index['key'] == [('orderbook_id', 1), ('datetime', 1)] for index in lists_of_indexes
@@ -65,8 +65,8 @@ class BaseDataUpdater(ABC):
     def pool_download(self, stock_list: list, num_workers: int = 5):
         pass
 
-    def main(self):
-        self._drop_db(self.db.name)
+    def main(self, refresh: bool = False):
+        self._drop_db(self.db.name, refresh=refresh)
         self.check_index()
         stock_list = self._get_stock_list()
         self.pool_download(stock_list)

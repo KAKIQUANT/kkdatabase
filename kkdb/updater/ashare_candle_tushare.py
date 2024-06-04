@@ -38,24 +38,3 @@ stock_zh_a_st_em_list = ak.stock_zh_a_st_em()["代码"].tolist()
 stock_list_safe = [stock for stock in stock_list if stock not in stock_zh_a_st_em_list]
 
 print(f"Total stocks: {len(stock_list_safe)}")
-
-# List to store stocks with gold crossover
-stocks_with_gold_crossover = []
-
-for stock_code in tqdm(stock_list_safe):
-    try:
-        # Get or update stock daily data from MongoDB
-        stock_data_df = get_stock_data_from_db(stock_code, "20200101", "20240118")
-        if stock_data_df.empty:
-            continue
-
-        # Calculate MACD
-        stock_data_df_with_macd = calculate_macd(stock_data_df)
-
-        # Check for gold crossover
-        if has_gold_crossover(stock_data_df_with_macd):
-            stocks_with_gold_crossover.append(stock_code)
-    except Exception as e:
-        print(f"Error processing {stock_code}: {e}")
-
-print(stocks_with_gold_crossover)

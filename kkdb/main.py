@@ -1,7 +1,7 @@
 # Main Entry Point for the KKDB Application
 import hydra
 from omegaconf import DictConfig
-from kkdb.updater.async_crypto import AsyncCryptoDataUpdater
+from kkdb.updater.backups.async_crypto import AsyncCryptoDataUpdater
 import asyncio
 from loguru import logger
 from hydra.core.global_hydra import GlobalHydra

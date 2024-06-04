@@ -70,6 +70,7 @@ class BaseDataUpdater(ABC):
         self.check_index()
         stock_list = self._get_stock_list()
         self.pool_download(stock_list)
+        self.check_index()
 
 if __name__ == "__main__":
     pass

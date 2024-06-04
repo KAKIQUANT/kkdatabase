@@ -1,8 +1,6 @@
 import pymongo
 from kkdb.utils.check_root_base import find_and_add_project_root
 import pandas as pd
-import hydra
-import copy
 import yaml
 
 cfg = yaml.load(open(find_and_add_project_root() + "/configs/db/mongodb.yaml"), Loader=yaml.FullLoader)

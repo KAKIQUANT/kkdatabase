@@ -2,7 +2,7 @@ import akshare as ak
 import pandas as pd
 from pymongo import MongoClient
 from datetime import datetime
-from kaki.utils.check_db import get_client_str
+from kkdb.utils.check_db import get_client_str
 from concurrent.futures import ThreadPoolExecutor
 
 

@@ -1,23 +1,18 @@
-"""
-2024/05/11 为了减少数据库报错，应把更新的数据截断至数据库最后的时间，这样可以避免重复插入数据。
-Update the crypto data in MongoDB asynchronously using aiohttp and asyncio.
-Full data, and will run everyday to update the data.
-"""
-
-import pandas as pd
-import logging
 import asyncio
 import random
-import aiohttp
-import okx.PublicData as PublicData
-from motor.motor_asyncio import AsyncIOMotorClient
+from typing import Iterable
+from aiohttp import AsyncResolver
 import numpy as np
-from typing import Optional, Iterable
-from pymongo.errors import BulkWriteError
+import pandas as pd
 from kkdb.utils.check_db import get_client_str
-class AsyncCryptoDataUpdater:
+from kkdb.updater.AsyncBaseDataUpdater import AsyncBaseDataUpdater
+from loguru import logger
+
+
+class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
     def __init__(
         self,
+        db_name: str = "crypto_okx",
         bar_sizes: Iterable[str] = [
             "1m",
             "3m",
@@ -31,12 +26,11 @@ class AsyncCryptoDataUpdater:
         ],
         max_concurrent_requests: int = 3,
         client_str: str = get_client_str(),
-        db_name: str = "crypto",
-        resolvers: Optional[aiohttp.resolver.AsyncResolver] = None,
+        resolvers: AsyncResolver | None = None,
     ) -> None:
-        self.client = AsyncIOMotorClient(client_str)
-        self.db = self.client[db_name]
-        self.bar_sizes = bar_sizes
+        super().__init__(
+            db_name, bar_sizes, max_concurrent_requests, client_str, resolvers
+        )
         self.market_url = "https://www.okx.com/api/v5/market/history-candles"
         self.headers = {
             "User-Agent": "PostmanRuntime/7.36.3",
@@ -48,149 +42,6 @@ class AsyncCryptoDataUpdater:
             "Host": "www.okx.com",
             "Referer": "https://www.okx.com/",
         }
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.resolver = resolvers
-        self.semaphore = asyncio.Semaphore(max_concurrent_requests)
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(message)s",
-        )
-
-    async def drop_db(self, refresh: bool = False, db_name: str = "crypto"):
-        if refresh:
-            await self.client.drop_database(name_or_database=db_name)
-            logging.info("Dropped database 'crypto'.")
-        else:
-            logging.info("Skipping database drop.")
-
-    async def start_session(self):
-        if self.session is None or self.session.closed:
-            timeout = aiohttp.ClientTimeout(total=10)
-            self.session = aiohttp.ClientSession(timeout=timeout)
-
-    async def close_session(self):
-        if self.session and not self.session.closed:
-            await self.session.close()
-
-    async def insert_data_to_mongodb(
-        self, collection_name: str, data: pd.DataFrame
-    ) -> None:
-        if not data.empty:
-            try:
-                collection = self.db[collection_name]
-                data_dict = data.to_dict("records")
-                await collection.insert_many(data_dict)  # type: ignore
-                logging.info(
-                    f"Inserted {len(data_dict)} new records into {collection_name} asynchronously."
-                )
-            except BulkWriteError as e:
-                logging.warning("Writing duplicate data encountered, skipping...")
-
-    async def get_all_coin_pairs(self, filter: Optional[str] = None) -> list[str]:
-        """
-        Get all coin pairs from the OKEx API.
-        Filter out the coin pairs with Regex.
-        """
-        # Wrap the synchronous calls in asyncio.to_thread to run them in separate threads
-        spot_result = await asyncio.to_thread(self._get_spot_instruments)
-        swap_result = await asyncio.to_thread(self._get_swap_instruments)
-
-        spot_list = [i["instId"] for i in spot_result["data"]]
-        swap_list = [i["instId"] for i in swap_result["data"]]
-        all_coin_pairs = spot_list + swap_list
-        if filter:
-            return [pair for pair in all_coin_pairs if filter in pair]
-        return all_coin_pairs
-
-    def _get_spot_instruments(self):
-        publicDataAPI = PublicData.PublicAPI(flag="0")
-        return publicDataAPI.get_instruments(instType="SPOT")
-
-    def _get_swap_instruments(self):
-        publicDataAPI = PublicData.PublicAPI(flag="0")
-        return publicDataAPI.get_instruments(instType="SWAP")
-
-    async def setup_check_mongodb(self, db):
-        """
-        Set up compound indexes for each collection in the MongoDB database.
-        """
-        collections = await db.list_collection_names()
-        print(collections)
-        for collection_name in collections:
-            collection = db[collection_name]
-            # Check if the compound index exists, exclude the original index
-            list_of_indexes = await collection.list_indexes().to_list(length=None)
-            if not any(
-                index["key"] == [("instId", 1), ("timestamp", 1)]
-                for index in list_of_indexes
-            ):
-                await collection.create_index(
-                    [("instId", 1), ("timestamp", 1)], unique=True
-                )
-                logging.info(f"Created compound index for {collection_name}.")
-            else:
-                logging.info(f"Compound index for {collection_name} already exists.")
-
-    async def check_existing_data(self, inst_id: str, bar: str) -> np.int64:
-        """
-        Finds the latest timestamp in the MongoDB collection.
-        """
-        collection = self.db[f"kline-{bar}"]
-        latest_doc = (
-            collection.find({"instId": inst_id}, {"timestamp": 1})
-            .sort("timestamp", -1)
-            .limit(1)
-        )
-        latest_timestamp = await latest_doc.to_list(length=1)
-        latest_timestamp = (
-            latest_timestamp[0]["timestamp"] if latest_timestamp else None
-        )
-        logging.info(
-            f"Found existing data for {inst_id} {bar} up to {latest_timestamp}."
-        )
-        # Convert datetime timestamp to timestamp in milliseconds in np.int64 format
-        return (
-            np.int64(latest_timestamp.timestamp() * 1000)
-            if latest_timestamp
-            else np.int64(0)
-        )
-
-    async def check_missing_data(self, inst_id, bar):
-        """
-        Checks if there is missing data in the MongoDB collection.
-        """
-        collection = self.db[f"kline-{bar}"]
-        latest_doc = collection.find({"instId": inst_id}, {"timestamp": 1}).sort(
-            "timestamp", -1
-        )
-        # Get all of them and convert to pd.DataFrame
-        df = pd.DataFrame(await latest_doc.to_list(length=None))
-        # Check the timeseries is continuous
-        return df["timestamp"].diff().dt.total_seconds().dropna().eq(60).all()
-
-    async def fix_missing_data(self, inst_id, bar):
-        """
-        Fixes missing data in the MongoDB collection.
-        """
-        collection = self.db[f"kline-{bar}"]
-        latest_doc = collection.find({"instId": inst_id}, {"timestamp": 1}).sort(
-            "timestamp", -1
-        )
-        # Get all of them and convert to pd.DataFrame
-        df = pd.DataFrame(await latest_doc.to_list(length=None))
-        # Check the timeseries is continuous
-        if not df["timestamp"].diff().dt.total_seconds().dropna().eq(60).all():
-            # Get the missing timestamps
-            missing_ts = pd.date_range(
-                start=df["timestamp"].min(), end=df["timestamp"].max(), freq="1min"
-            ).difference(df["timestamp"])
-            # Create a new DataFrame with the missing timestamps
-            missing_df = pd.DataFrame({"timestamp": missing_ts})
-            # Insert the missing data into the collection
-            await self.insert_data_to_mongodb(f"kline-{bar}", missing_df)
-            logging.info(
-                f"Inserted {len(missing_df)} missing records into {inst_id} {bar}."
-            )
 
     async def fetch_one(
         self, inst_id: str, bar: str, before: np.int64, after: np.int64, limit: int
@@ -210,12 +61,15 @@ class AsyncCryptoDataUpdater:
             if self.session is not None:
                 while True:
                     async with self.session.get(
-                        self.market_url, params=params, headers=self.headers, resolver=self.resolver
+                        self.market_url,
+                        params=params,
+                        headers=self.headers,
+                        resolver=self.resolver,
                     ) as response:
                         if response.status == 200:
                             result = await response.json()
                             if not result["data"]:
-                                logging.info(
+                                logger.info(
                                     f"No more data to fetch or empty data returned for {inst_id}-{bar}."
                                 )
                                 return None
@@ -256,7 +110,7 @@ class AsyncCryptoDataUpdater:
                                 return df
 
                         elif response.status == 429:
-                            logging.debug(f"Too many requests for {bar} - {inst_id}.")
+                            logger.debug(f"Too many requests for {bar} - {inst_id}.")
                             await asyncio.sleep(1)
                             break
 
@@ -264,7 +118,7 @@ class AsyncCryptoDataUpdater:
         self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
     ):
         collection_latest = await self.check_existing_data(inst_id, bar)
-        logging.info(
+        logger.info(
             f"Found existing data for {inst_id} {bar} up to {collection_latest}."
         )
         latest_ts = await self.now_ts()
@@ -291,7 +145,7 @@ class AsyncCryptoDataUpdater:
                             if response.status == 200:
                                 result = await response.json()
                                 if not result["data"]:
-                                    logging.info(
+                                    logger.info(
                                         f"No more data to fetch or empty data returned for {inst_id}-{bar}."
                                     )
                                     return None
@@ -334,7 +188,7 @@ class AsyncCryptoDataUpdater:
                                     await self.insert_data_to_mongodb(
                                         f"kline-{bar}", df
                                     )  # Adjust as per your actual method signature
-                                    logging.debug(
+                                    logger.debug(
                                         f"Successfully inserted data for {inst_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
                                     )
                                     a = np.int64(result["data"][-1][0]) - np.int64(1)
@@ -352,24 +206,24 @@ class AsyncCryptoDataUpdater:
                                     )
 
                             elif response.status == 429:
-                                logging.debug(
+                                logger.debug(
                                     f"Too many requests for {bar} - {inst_id}."
                                 )
-                                # await asyncio.sleep(sleep_time/10)
+                                
                             else:
-                                logging.error(
+                                logger.error(
                                     f"Failed to fetch data with status code {response.status}"
                                 )
                                 return None
 
             except Exception as e:
-                logging.error(f"Error occurred: {e}, Retrying...")
+                logger.error(f"Error occurred: {e}, Retrying...")
                 await asyncio.sleep(sleep_time)
 
     async def initialize_update(self):
         # List of restaurants could be big, think in promise of plying across the sums as detailed.
         coin_pairs = await self.get_all_coin_pairs(filter="USDT")
-        logging.info(
+        logger.info(
             f"Fetching data for {len(coin_pairs)} coin pairs.\n Pairs: {coin_pairs}"
         )
         bar_sizes = self.bar_sizes
@@ -379,17 +233,7 @@ class AsyncCryptoDataUpdater:
                 tasks.append(asyncio.create_task(self.fetch_kline_data(inst_id, bar)))
         await asyncio.gather(*tasks)
 
-    async def main(self):
-        await self.drop_db(refresh=False)
-        await self.setup_check_mongodb(self.db)
-        await self.start_session()
-        await self.initialize_update()
-        await self.close_session()
-        await self.setup_check_mongodb(self.db)
-
-
 if __name__ == "__main__":
-    updater = AsyncCryptoDataUpdater()
-    # asyncio.run(updater.main())
+    updater = AsyncOkxCandleUpdater()
     # Check conpound index
-    asyncio.run(updater.setup_check_mongodb(updater.db))
+    asyncio.run(updater.check_index(updater.db))

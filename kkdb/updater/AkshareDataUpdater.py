@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Iterable
+from retry import retry
 
 class AkshareDataUpdater(BaseDataUpdater):
     def __init__(
@@ -46,6 +47,7 @@ class AkshareDataUpdater(BaseDataUpdater):
         stock_list_df = ak.stock_zh_a_spot_em()
         return stock_list_df["代码"].tolist()
 
+    @retry(tries=3, delay=5)
     def _single_download(self, stock_code: str, freq: str) -> pd.DataFrame:
         if freq == "1D":
             stock_data_df = ak.stock_zh_a_hist(symbol=stock_code, adjust="hfq")
@@ -53,10 +55,12 @@ class AkshareDataUpdater(BaseDataUpdater):
             stock_data_df = ak.stock_zh_a_hist(
                 symbol=stock_code, period="weekly", adjust="hfq"
             )
-        else:
+        elif freq == '1m':
             stock_data_df = ak.stock_zh_a_minute(
-                symbol=stock_code, period=freq.lower(), adjust="qfq"
+                symbol=stock_code, period=freq.lower(), adjust="hfq"
             )
+        else:
+            pass
         if not stock_data_df.empty:
             stock_data_df = self._process_df(stock_data_df)
             self._insert_data(f"kline-{freq}", stock_data_df)

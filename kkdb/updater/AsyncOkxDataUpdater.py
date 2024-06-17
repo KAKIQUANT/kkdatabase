@@ -1,5 +1,7 @@
 import asyncio
 import random
+from datetime import datetime
+
 from aiohttp import AsyncResolver
 import numpy as np
 import pandas as pd
@@ -7,13 +9,24 @@ from kkdb.utils.check_db import get_client_str
 from kkdb.utils.time_convertion import now_ts
 from kkdb.updater.AsyncBaseDataUpdater import AsyncBaseDataUpdater
 from loguru import logger
-
+import okx.PublicData as PublicData
+from typing import Optional
 
 class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
     def __init__(
             self,
             db_name: str = "crypto_okx",
-            bar_sizes=None,
+            bar_sizes: list = [
+                "1m",
+                "3m",
+                "5m",
+                "15m",
+                "30m",
+                "1H",
+                "4H",
+                "1D",
+                "1W",
+            ],
             max_concurrent_requests: int = 3,
             client_str: str = get_client_str(),
             resolvers: AsyncResolver | None = None,
@@ -24,18 +37,6 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
         )
         self.proxy = proxy
         self.time_interval = None
-        if bar_sizes is None:
-            bar_sizes = [
-                "1m",
-                "3m",
-                "5m",
-                "15m",
-                "30m",
-                "1H",
-                "4H",
-                "1D",
-                "1W",
-            ]
         self.market_url = "https://www.okx.com/api/v5/market/history-candles"
         self.headers = {
             "User-Agent": "PostmanRuntime/7.36.3",
@@ -48,76 +49,29 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
             "Referer": "https://www.okx.com/",
         }
 
-    async def fetch_one(
-            self, inst_id: str, bar: str, before: np.int64, after: np.int64, limit: int
-    ):
+    async def _get_all_coin_pairs(self, filter: Optional[str] = None) -> list[str]:
         """
-        Fetches data for a single instrument and bar size. Will ensure return a pd.Dataframe if data exist in the before-after range.
+        Get all coin pairs from the OKEx API.
+        Filter out the coin pairs with Regex.
         """
-        params = {
-            "instId": inst_id,
-            "before": str(before),
-            "after": str(after),
-            "bar": bar,
-            "limit": str(limit),
-        }
+        # Wrap the synchronous calls in asyncio.to_thread to run them in separate threads
+        spot_result = await asyncio.to_thread(self._get_spot_instruments)
+        swap_result = await asyncio.to_thread(self._get_swap_instruments)
 
-        async with self.semaphore:
-            if self.session is not None:
-                while True:
-                    async with self.session.get(
-                            self.market_url,
-                            params=params,
-                            headers=self.headers,
-                            resolver=self.resolver,
-                    ) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            if not result["data"]:
-                                logger.info(
-                                    f"No more data to fetch or empty data returned for {inst_id}-{bar}."
-                                )
-                                return None
-                            else:
-                                df = pd.DataFrame(
-                                    result["data"],
-                                    columns=[
-                                        "timestamp",
-                                        "open",
-                                        "high",
-                                        "low",
-                                        "close",
-                                        "volume",
-                                        "volCcy",
-                                        "volCcyQuote",
-                                        "confirm",
-                                    ],
-                                )
-                                df["timestamp"] = pd.to_datetime(
-                                    df["timestamp"].astype(np.int64), unit="ms"
-                                )
-                                numeric_fields = [
-                                    "open",
-                                    "high",
-                                    "low",
-                                    "close",
-                                    "volume",
-                                    "volCcy",
-                                    "volCcyQuote",
-                                    "confirm",
-                                ]
-                                for field in numeric_fields:
-                                    df[field] = pd.to_numeric(
-                                        df[field], errors="coerce"
-                                    )
-                                df["instId"] = inst_id
-                                df["bar"] = bar
-                                return df
+        spot_list = [i["instId"] for i in spot_result["data"]]
+        swap_list = [i["instId"] for i in swap_result["data"]]
+        all_coin_pairs = spot_list + swap_list
+        if filter:
+            return [pair for pair in all_coin_pairs if filter in pair]
+        return all_coin_pairs
 
-                        elif response.status == 429:
-                            logger.debug(f"Too many requests for {bar} - {inst_id}.")
-                            await asyncio.sleep(1)
-                            break
+    def _get_spot_instruments(self):
+        publicDataAPI = PublicData.PublicAPI(flag="0")
+        return publicDataAPI.get_instruments(instType="SPOT")
+
+    def _get_swap_instruments(self):
+        publicDataAPI = PublicData.PublicAPI(flag="0")
+        return publicDataAPI.get_instruments(instType="SWAP")
 
     async def fetch_kline_data(
             self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
@@ -188,10 +142,10 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                     df["instId"] = inst_id
                                     df["bar"] = bar
                                     # Make sure all timestamps in df is greater than collection_latest
-                                    df = df[df["timestamp"] > collection_latest]
-                                    await self.insert_data_to_mongodb(
+                                    df = df[df["timestamp"] > datetime.fromtimestamp(collection_latest / 1000, tz=df["timestamp"].dt.tz)]
+                                    await self.insert_data(
                                         f"kline-{bar}", df
-                                    )  # Adjust as per your actual method signature
+                                    )
                                     logger.debug(
                                         f"Successfully inserted data for {inst_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
                                     )
@@ -320,7 +274,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
 
     async def initialize_update(self):
         # List of restaurants could be big, think in promise of plying across the sums as detailed.
-        coin_pairs = await self.get_all_coin_pairs(filter="USDT")
+        coin_pairs = await self._get_all_coin_pairs(filter="USDT")
         logger.info(
             f"Fetching data for {len(coin_pairs)} coin pairs.\n Pairs: {coin_pairs}"
         )

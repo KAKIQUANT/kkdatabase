@@ -1,63 +1,36 @@
-# Main Entry Point for the KKDB Application
 import hydra
 from omegaconf import DictConfig
-from kkdb.updater.AsyncOkxDataUpdater import AsyncOkxCandleUpdater
-import asyncio
-from loguru import logger
-from hydra.core.global_hydra import GlobalHydra
-import os
-from aiohttp.resolver import AsyncResolver
 import requests
+from loguru import logger
+import asyncio
 
-# Clear any existing global Hydra instance
-GlobalHydra.instance().clear()
+# Placeholder for your actual updater classes
+from kkdb.updater.AsyncOkxDataUpdater import AsyncOkxCandleUpdater
+from kkdb.updater.AsyncAkshareDataUpdater import AsyncAkshareDataUpdater
+from kkdb.tasks.async_task import update_crypto_data, update_cn_stock_data, update_all_data_sources
+from kkdb.tasks.sync_task import check_ip_address
+def run_async_main(cfg):
+    asyncio.run(async_main(cfg))
 
-# Setup logger
-logger.add(
-    sink="./logs/updater.log",
-    rotation="1 day",
-    retention="7 days",
-    enqueue=True,
-    backtrace=True,
-    diagnose=True,
-)
+async def async_main(cfg):
+    logger.info("Application Starting...")
+    if cfg.get('check_ip'):
+        check_ip_address()
 
+    tasks = []
+    if cfg.get('update_crypto'):
+        tasks.append(asyncio.create_task(update_crypto_data(cfg)))
+    if cfg.get('update_cn_stock'):
+        tasks.append(asyncio.create_task(update_cn_stock_data(cfg)))
+    if cfg.get('update_all'):
+        tasks.append(asyncio.create_task(update_all_data_sources(cfg)))
+
+    if tasks:
+        await asyncio.gather(*tasks)
 
 @hydra.main(config_path="configs", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
-    """
-    Main entry point for the KKDB application
-    Args:
-        cfg:
-    """
-    logger.debug(cfg)
-    nameservers = cfg.dns.nameservers
-    resolver = AsyncResolver(nameservers=nameservers)
-
-    if cfg.proxy.enable:
-        logger.debug("Proxy is enabled")
-        logger.debug(f"HTTP Proxy: {cfg.proxy.http}")
-        logger.debug(f"HTTPS Proxy: {cfg.proxy.https}")
-        logger.debug(f"SOCKS5 Proxy: {cfg.proxy.socks5}")
-        # Setup Proxy if necessary
-        os.environ["http_proxy"] = cfg.proxy.http
-        os.environ["https_proxy"] = cfg.proxy.https
-        os.environ["socks_proxy"] = cfg.proxy.socks5
-
-    logger.debug("Current IP address: ")
-    logger.debug(requests.get("http://httpbin.org/ip").json())
-    
-    # Initialize Crypto Data Updater
-    if cfg.datasource.crypto:
-        updater = AsyncOkxCandleUpdater(
-            client_str=cfg.db.connection_string,
-            db_name=cfg.db.db_name.crypto,
-            resolvers=resolver,
-            proxy=cfg.proxy.http,
-        )
-        asyncio.run(updater.main())
-    if cfg.datasource.cn_stock:
-        pass
+    run_async_main(cfg)
 
 if __name__ == "__main__":
     main()

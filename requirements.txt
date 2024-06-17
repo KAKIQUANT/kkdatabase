@@ -1,7 +1,7 @@
 # Config & Tools
 typing
 python-dotenv
-pandas
+pandas>=2.0.0
 seaborn
 tqdm
 python-telegram-bot
@@ -21,14 +21,11 @@ fastapi
 streamlit
 aiodns
 loguru
-
-
-
-
-yaml
 pyyaml
 kkdb
 numpy
 matplotlib
 requests
 setuptools
+retry
+python-okx

@@ -22,6 +22,7 @@ class AsyncBaseDataUpdater(ABC):
             client_str: str = get_client_str(),
             resolvers: Optional[aiohttp.resolver.AsyncResolver] = None,
     ) -> None:
+        self.db_name = db_name
         self.client = AsyncIOMotorClient(client_str)
         self.db: AsyncIOMotorDatabase = self.client[db_name]
         self.bar_sizes: Iterable[str] = bar_sizes
@@ -37,7 +38,7 @@ class AsyncBaseDataUpdater(ABC):
         Set up compound indexes for each collection in the MongoDB database.
         """
         collections = await self.db.list_collection_names()
-        print(collections)
+        logger.info(collections)
         for collection_name in collections:
             collection = self.db[collection_name]
             # Check if the compound index exists, exclude the original index
@@ -53,10 +54,10 @@ class AsyncBaseDataUpdater(ABC):
             else:
                 logger.info(f"Compound index for {collection_name} already exists.")
 
-    async def drop_db(self, refresh: bool = False, db_name: str = "crypto"):
+    async def drop_db(self, refresh: bool = False):
         if refresh:
-            await self.client.drop_database(name_or_database=db_name)
-            logger.info(f"Dropped database {db_name}.")
+            await self.client.drop_database(name_or_database=self.db_name)
+            logger.info(f"Dropped database {self.db_name}.")
         else:
             logger.info("Skipping database drop.")
 
@@ -82,6 +83,10 @@ class AsyncBaseDataUpdater(ABC):
                 )
             except BulkWriteError:
                 logger.warning("Writing duplicate data encountered, skipping...")
+            except Exception as e:
+                logger.error(f"Error inserting data: {e}")
+        else:
+            logger.info(f"No new data to insert into {collection_name}.")
 
     async def check_existing_data(self, inst_id: str, bar: str) -> tuple[np.int64, np.int64]:
         """
@@ -159,7 +164,6 @@ class AsyncBaseDataUpdater(ABC):
                 f"Inserted {len(missing_df)} missing records into {inst_id} {bar}."
             )
 
-    @abstractmethod
     async def fetch_one(
             self, inst_id: str, bar: str, before: np.int64, after: np.int64, limit: int
     ):
@@ -174,7 +178,6 @@ class AsyncBaseDataUpdater(ABC):
         """
         raise NotImplementedError
 
-    @abstractmethod
     async def fetch_kline_data(
             self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
     ):

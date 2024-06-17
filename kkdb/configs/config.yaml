@@ -3,8 +3,8 @@ defaults:
   - db: mongodb
 
 proxy:
-  enable: false
-  http: http://10.201.8.104:7890
+  enable: True
+  http: http://10.201.8.104:18443
   https: http://10.201.8.104:7890
   socks5: socks5://10.201.8.104:7890
 
@@ -23,3 +23,8 @@ dns:
   nameservers:
     - 8.8.8.8
     - 8.8.4.4
+
+check_ip: false
+update_crypto: false
+update_cn_stock: false
+update_all: false

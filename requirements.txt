@@ -21,7 +21,6 @@ fastapi
 streamlit
 aiodns
 loguru
-pyyaml
 kkdb
 numpy
 matplotlib

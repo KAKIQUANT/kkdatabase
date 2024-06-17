@@ -4,9 +4,9 @@ defaults:
 
 proxy:
   enable: false
-  http: http://localhost:7890
-  https: http://localhost:7890
-  socks5: socks5://localhost:7890
+  http: http://10.201.8.104:7890
+  https: http://10.201.8.104:7890
+  socks5: socks5://10.201.8.104:7890
 
 output:
   dir: "./logs/"

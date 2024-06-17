@@ -4,20 +4,23 @@ import asyncio
 import aiohttp
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 import numpy as np
-from typing import Optional, Iterable
+from typing import Optional, Iterable, Tuple
+
+from numpy import signedinteger
+from numpy._typing import _64Bit
 from pymongo.errors import BulkWriteError
 from kkdb.utils.check_db import get_client_str
 from abc import ABC, abstractmethod
 
-# For MongoDB only
+
 class AsyncBaseDataUpdater(ABC):
     def __init__(
-        self,
-        db_name: str,
-        bar_sizes: Iterable[str],
-        max_concurrent_requests: int = 3,
-        client_str: str = get_client_str(),
-        resolvers: Optional[aiohttp.resolver.AsyncResolver] = None,
+            self,
+            db_name: str,
+            bar_sizes: Iterable[str],
+            max_concurrent_requests: int = 3,
+            client_str: str = get_client_str(),
+            resolvers: Optional[aiohttp.resolver.AsyncResolver] = None,
     ) -> None:
         self.client = AsyncIOMotorClient(client_str)
         self.db: AsyncIOMotorDatabase = self.client[db_name]
@@ -27,6 +30,28 @@ class AsyncBaseDataUpdater(ABC):
         self.session: Optional[aiohttp.ClientSession] = None
         self.resolver: aiohttp.AsyncResolver | None = resolvers
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
+
+    # For MongoDB only
+    async def check_index(self):
+        """
+        Set up compound indexes for each collection in the MongoDB database.
+        """
+        collections = await self.db.list_collection_names()
+        print(collections)
+        for collection_name in collections:
+            collection = self.db[collection_name]
+            # Check if the compound index exists, exclude the original index
+            list_of_indexes = await collection.list_indexes().to_list(length=None)
+            if not any(
+                    index["key"] == [("instId", 1), ("timestamp", 1)]
+                    for index in list_of_indexes
+            ):
+                await collection.create_index(
+                    [("instId", 1), ("timestamp", 1)], unique=True
+                )
+                logger.info(f"Created compound index for {collection_name}.")
+            else:
+                logger.info(f"Compound index for {collection_name} already exists.")
 
     async def drop_db(self, refresh: bool = False, db_name: str = "crypto"):
         if refresh:
@@ -45,7 +70,7 @@ class AsyncBaseDataUpdater(ABC):
             await self.session.close()
 
     async def insert_data(
-        self, collection_name: str, data: pd.DataFrame
+            self, collection_name: str, data: pd.DataFrame
     ) -> None:
         if not data.empty:
             try:
@@ -58,31 +83,10 @@ class AsyncBaseDataUpdater(ABC):
             except BulkWriteError:
                 logger.warning("Writing duplicate data encountered, skipping...")
 
-    
-    async def check_index(self, db):
-        """
-        Set up compound indexes for each collection in the MongoDB database.
-        """
-        collections = await db.list_collection_names()
-        print(collections)
-        for collection_name in collections:
-            collection = db[collection_name]
-            # Check if the compound index exists, exclude the original index
-            list_of_indexes = await collection.list_indexes().to_list(length=None)
-            if not any(
-                index["key"] == [("instId", 1), ("timestamp", 1)]
-                for index in list_of_indexes
-            ):
-                await collection.create_index(
-                    [("instId", 1), ("timestamp", 1)], unique=True
-                )
-                logger.info(f"Created compound index for {collection_name}.")
-            else:
-                logger.info(f"Compound index for {collection_name} already exists.")
-
-    async def check_existing_data(self, inst_id: str, bar: str) -> np.int64:
+    async def check_existing_data(self, inst_id: str, bar: str) -> tuple[np.int64, np.int64]:
         """
         Finds the latest timestamp in the MongoDB collection.
+        Returns the earliest and latest timestamps in milliseconds.
         """
         collection = self.db[f"kline-{bar}"]
         latest_doc = (
@@ -94,11 +98,25 @@ class AsyncBaseDataUpdater(ABC):
         latest_timestamp = (
             latest_timestamp[0]["timestamp"] if latest_timestamp else None
         )
-        logger.info(
-            f"Found existing data for {inst_id} {bar} up to {latest_timestamp}."
+        earliest_doc = (
+            collection.find({"instId": inst_id}, {"timestamp": 1})
+            .sort("timestamp", 1)
+            .limit(1)
+        )
+        earliest_timestamp = await earliest_doc.to_list(length=1)
+        earliest_timestamp = (
+            earliest_timestamp[0]["timestamp"] if earliest_timestamp else None
+        )
+
+        logger.debug(
+            f"Found existing data for {inst_id} {bar} start from {earliest_timestamp} to end {latest_timestamp}."
         )
         # Convert datetime timestamp to timestamp in milliseconds in np.int64 format
         return (
+            np.int64(earliest_timestamp.timestamp() * 1000)
+            if earliest_timestamp
+            else np.int64(0)
+            ,
             np.int64(latest_timestamp.timestamp() * 1000)
             if latest_timestamp
             else np.int64(0)
@@ -143,7 +161,7 @@ class AsyncBaseDataUpdater(ABC):
 
     @abstractmethod
     async def fetch_one(
-        self, inst_id: str, bar: str, before: np.int64, after: np.int64, limit: int
+            self, inst_id: str, bar: str, before: np.int64, after: np.int64, limit: int
     ):
         """
         Fetches data for a single instrument and bar type. Will ensure return a pd.Dataframe if data exist in the before-after range.
@@ -158,7 +176,7 @@ class AsyncBaseDataUpdater(ABC):
 
     @abstractmethod
     async def fetch_kline_data(
-        self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
+            self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
     ):
         raise NotImplementedError
 
@@ -168,15 +186,15 @@ class AsyncBaseDataUpdater(ABC):
 
     async def main(self):
         await self.drop_db(refresh=False)
-        await self.check_index(self.db)
+        await self.check_index()
         await self.start_session()
         await self.initialize_update()
         await self.close_session()
-        await self.check_index(self.db)
+        await self.check_index()
 
 
 if __name__ == "__main__":
     updater = AsyncBaseDataUpdater()
     # asyncio.run(updater.main())
     # Check conpound index
-    asyncio.run(updater.check_index(updater.db))
+    asyncio.run(updater.check_index())

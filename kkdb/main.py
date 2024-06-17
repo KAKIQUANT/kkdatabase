@@ -1,7 +1,7 @@
 # Main Entry Point for the KKDB Application
 import hydra
 from omegaconf import DictConfig
-from kkdb.updater.backups.async_crypto import AsyncCryptoDataUpdater
+from kkdb.updater.AsyncOkxDataUpdater import AsyncOkxCandleUpdater
 import asyncio
 from loguru import logger
 from hydra.core.global_hydra import GlobalHydra
@@ -25,6 +25,11 @@ logger.add(
 
 @hydra.main(config_path="configs", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
+    """
+    Main entry point for the KKDB application
+    Args:
+        cfg:
+    """
     logger.debug(cfg)
     nameservers = cfg.dns.nameservers
     resolver = AsyncResolver(nameservers=nameservers)
@@ -44,10 +49,11 @@ def main(cfg: DictConfig):
     
     # Initialize Crypto Data Updater
     if cfg.datasource.crypto:
-        updater = AsyncCryptoDataUpdater(
+        updater = AsyncOkxCandleUpdater(
             client_str=cfg.db.connection_string,
             db_name=cfg.db.db_name.crypto,
             resolvers=resolver,
+            proxy=cfg.proxy.http,
         )
         asyncio.run(updater.main())
     if cfg.datasource.cn_stock:

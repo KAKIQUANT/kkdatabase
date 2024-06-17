@@ -1,6 +1,6 @@
 import datetime
 import numpy as np
-
+import pandas as pd
 def timestamp_to_datetime(ts):
     pass
 
@@ -21,9 +21,12 @@ def timestamp_to_readable_date(timestamp, format='%Y-%m-%d %H:%M:%S'):
 
     return datetime.fromtimestamp(timestamp).strftime(format)
 
-async def now_ts(self) -> np.int64:
-        now = datetime.datetime.now()
-        return np.int64(now.timestamp() * 1000)
+async def now_ts():
+    """
+    Get current timestamp in milliseconds.
+    Returns: np.int64
+    """
+    return np.int64(pd.Timestamp.now().timestamp() * 1000)
 
 def convert_ints_to_np_int64(self, obj):
         if isinstance(obj, dict):

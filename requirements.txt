@@ -24,3 +24,11 @@ loguru
 
 
 
+
+yaml
+pyyaml
+kkdb
+numpy
+matplotlib
+requests
+setuptools

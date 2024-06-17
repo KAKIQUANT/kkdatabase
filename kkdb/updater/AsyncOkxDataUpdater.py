@@ -1,36 +1,41 @@
 import asyncio
 import random
-from typing import Iterable
 from aiohttp import AsyncResolver
 import numpy as np
 import pandas as pd
 from kkdb.utils.check_db import get_client_str
+from kkdb.utils.time_convertion import now_ts
 from kkdb.updater.AsyncBaseDataUpdater import AsyncBaseDataUpdater
 from loguru import logger
 
 
 class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
     def __init__(
-        self,
-        db_name: str = "crypto_okx",
-        bar_sizes: Iterable[str] = [
-            "1m",
-            "3m",
-            "5m",
-            "15m",
-            "30m",
-            "1H",
-            "4H",
-            "1D",
-            "1W",
-        ],
-        max_concurrent_requests: int = 3,
-        client_str: str = get_client_str(),
-        resolvers: AsyncResolver | None = None,
+            self,
+            db_name: str = "crypto_okx",
+            bar_sizes=None,
+            max_concurrent_requests: int = 3,
+            client_str: str = get_client_str(),
+            resolvers: AsyncResolver | None = None,
+            proxy: str = None,
     ) -> None:
         super().__init__(
             db_name, bar_sizes, max_concurrent_requests, client_str, resolvers
         )
+        self.proxy = proxy
+        self.time_interval = None
+        if bar_sizes is None:
+            bar_sizes = [
+                "1m",
+                "3m",
+                "5m",
+                "15m",
+                "30m",
+                "1H",
+                "4H",
+                "1D",
+                "1W",
+            ]
         self.market_url = "https://www.okx.com/api/v5/market/history-candles"
         self.headers = {
             "User-Agent": "PostmanRuntime/7.36.3",
@@ -44,7 +49,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
         }
 
     async def fetch_one(
-        self, inst_id: str, bar: str, before: np.int64, after: np.int64, limit: int
+            self, inst_id: str, bar: str, before: np.int64, after: np.int64, limit: int
     ):
         """
         Fetches data for a single instrument and bar size. Will ensure return a pd.Dataframe if data exist in the before-after range.
@@ -61,10 +66,10 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
             if self.session is not None:
                 while True:
                     async with self.session.get(
-                        self.market_url,
-                        params=params,
-                        headers=self.headers,
-                        resolver=self.resolver,
+                            self.market_url,
+                            params=params,
+                            headers=self.headers,
+                            resolver=self.resolver,
                     ) as response:
                         if response.status == 200:
                             result = await response.json()
@@ -115,18 +120,15 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                             break
 
     async def fetch_kline_data(
-        self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
+            self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
     ):
-        collection_latest = await self.check_existing_data(inst_id, bar)
-        logger.info(
-            f"Found existing data for {inst_id} {bar} up to {collection_latest}."
-        )
-        latest_ts = await self.now_ts()
+        collection_earliest, collection_latest = await self.check_existing_data(inst_id, bar)
+        latest_ts = await now_ts()
         a = latest_ts
         b: np.int64 = a
 
         is_first_time = True
-        # Fetch until no more data is returned
+        # Fetch newer data until no more data is returned
         while b > collection_latest:
             try:
                 params = {
@@ -140,7 +142,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                 async with self.semaphore:
                     if self.session is not None:
                         async with self.session.get(
-                            self.market_url, params=params, headers=self.headers
+                                self.market_url, params=params, headers=self.headers, proxy=self.proxy
                         ) as response:
                             if response.status == 200:
                                 result = await response.json()
@@ -185,6 +187,8 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                         )
                                     df["instId"] = inst_id
                                     df["bar"] = bar
+                                    # Make sure all timestamps in df is greater than collection_latest
+                                    df = df[df["timestamp"] > collection_latest]
                                     await self.insert_data_to_mongodb(
                                         f"kline-{bar}", df
                                     )  # Adjust as per your actual method signature
@@ -197,19 +201,113 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                         time_interval = abs(
                                             np.int64(result["data"][0][0]) - a
                                         )
+                                        self.time_interval = time_interval
                                         is_first_time = False
                                     b = (
-                                        a
-                                        - time_interval
-                                        - np.int64(4)
-                                        + np.int64(random.randint(1, 10) * 2)
+                                            a
+                                            - time_interval
+                                            - np.int64(4)
+                                            + np.int64(random.randint(1, 10) * 2)
                                     )
 
                             elif response.status == 429:
                                 logger.debug(
                                     f"Too many requests for {bar} - {inst_id}."
                                 )
-                                
+
+                            else:
+                                logger.error(
+                                    f"Failed to fetch data with status code {response.status}"
+                                )
+                                return None
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}, Retrying...")
+                await asyncio.sleep(sleep_time)
+
+        # Fetch data older than the existing data if any
+        a = collection_earliest
+        b = a - self.time_interval - np.int64(4) + np.int64(random.randint(1, 10) * 2)
+        while b > collection_earliest:
+            try:
+                params = {
+                    "instId": inst_id,
+                    "before": str(b),
+                    "after": str(a),
+                    "bar": bar,
+                    "limit": str(limit),
+                }
+
+                async with self.semaphore:
+                    if self.session is not None:
+                        async with self.session.get(
+                                self.market_url, params=params, headers=self.headers, proxy=self.proxy
+                        ) as response:
+                            if response.status == 200:
+                                result = await response.json()
+                                if not result["data"]:
+                                    logger.info(
+                                        f"No more data to fetch or empty data returned for {inst_id}-{bar}."
+                                    )
+                                    return None
+                                else:
+                                    df = pd.DataFrame(
+                                        result["data"],
+                                        columns=[
+                                            "timestamp",
+                                            "open",
+                                            "high",
+                                            "low",
+                                            "close",
+                                            "volume",
+                                            "volCcy",
+                                            "volCcyQuote",
+                                            "confirm",
+                                        ],
+                                    )
+                                    df["timestamp"] = pd.to_datetime(
+                                        df["timestamp"].values.astype(np.int64),
+                                        unit="ms",
+                                        utc=True,
+                                    ).tz_convert("Asia/Shanghai")
+                                    numeric_fields = [
+                                        "open",
+                                        "high",
+                                        "low",
+                                        "close",
+                                        "volume",
+                                        "volCcy",
+                                        "volCcyQuote",
+                                        "confirm",
+                                    ]
+                                    for field in numeric_fields:
+                                        df[field] = pd.to_numeric(
+                                            df[field], errors="coerce"
+                                        )
+                                    df["instId"] = inst_id
+                                    df["bar"] = bar
+                                    # Make sure all timestamps in df is less than collection_earliest
+                                    df = df[df["timestamp"] < collection_earliest]
+
+                                    await self.insert_data_to_mongodb(
+                                        f"kline-{bar}", df
+                                    )  # Adjust as per your actual method signature
+                                    logger.debug(
+                                        f"Successfully inserted data for {inst_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
+                                    )
+                                    a = np.int64(result["data"][-1][0]) - np.int64(1)
+                                    b = (
+                                            a
+                                            - time_interval
+                                            - np.int64(4)
+                                            + np.int64(random.randint(1, 10) * 2)
+                                    )
+
+                            elif response.status == 429:
+                                logger.debug(
+                                    f"Too many requests for {bar} - {inst_id}."
+                                )
+
                             else:
                                 logger.error(
                                     f"Failed to fetch data with status code {response.status}"
@@ -233,7 +331,11 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                 tasks.append(asyncio.create_task(self.fetch_kline_data(inst_id, bar)))
         await asyncio.gather(*tasks)
 
+
+
 if __name__ == "__main__":
-    updater = AsyncOkxCandleUpdater()
+    updater = AsyncOkxCandleUpdater(db_name="crypto")
     # Check conpound index
-    asyncio.run(updater.check_index(updater.db))
+    # asyncio.run(updater.check_index())
+    inst_id, bar = "BTC-USDT-SWAP", "1m"
+    asyncio.run(updater.check_existing_data(inst_id, bar))

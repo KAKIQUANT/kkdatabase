@@ -57,10 +57,10 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
 
     async def _get_existing_data_range(self, stock_code: str, collection_name: str):
         collection = self.db[collection_name]
-        earliest_record = await collection.find_one({'orderbook_id': stock_code}, sort=[("datetime", 1)])
-        latest_record = await collection.find_one({'orderbook_id': stock_code}, sort=[("datetime", -1)])
-        earliest = earliest_record['datetime'] if earliest_record else None
-        latest = latest_record['datetime'] if latest_record else None
+        earliest_record = await collection.find_one({'orderbook_id': stock_code}, sort=[("timestamp", 1)])
+        latest_record = await collection.find_one({'orderbook_id': stock_code}, sort=[("timestamp", -1)])
+        earliest = earliest_record['timestamp'] if earliest_record else None
+        latest = latest_record['timestamp'] if latest_record else None
         return earliest, latest
 
     @retry(tries=3, delay=5)

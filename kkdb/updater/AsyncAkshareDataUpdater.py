@@ -88,8 +88,8 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
         # Define the function to get data with time filtering
         def fetch_data():
             if earliest and latest:
-                newer = download_data(stock_code, freq, latest, None)
-                older = download_data(stock_code, freq, None, earliest)
+                newer = self.download_data(stock_code, freq, latest, None)
+                older = self.download_data(stock_code, freq, None, earliest)
                 return pd.concat([older, newer])
             return download_data(stock_code, freq, None, None)
 

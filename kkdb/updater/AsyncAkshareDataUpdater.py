@@ -70,7 +70,7 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
 
     def download_data(self, stock_code, freq, start_date, end_date) -> pd.DataFrame:
         if freq == "1m":
-            return ak.stock_zh_a_minute(symbol=stock_code, adjust="hfq", start_date=start_date, end_date=end_date)
+            return ak.stock_zh_a_minute(symbol=stock_code)
         elif freq == "1D":
             return ak.stock_zh_a_hist(symbol=stock_code, period="daily", ajust="hfq", start_date=start_date, end_date=end_date)
         elif freq == "1W":

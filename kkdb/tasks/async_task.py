@@ -18,7 +18,7 @@ async def update_cn_stock_data(cfg):
     logger.info("Updating China stock data...")
     updater = AsyncAkshareDataUpdater(
         db_name=cfg.db.db_name.cn_stock,
-        bar_sizes=["1D", "1W"],
+        bar_sizes=["1m", "1D", "1W", "1M"],
         client_str=cfg.db.str,
     )
     await updater.main()

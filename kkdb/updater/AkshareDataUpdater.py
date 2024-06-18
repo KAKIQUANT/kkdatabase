@@ -48,7 +48,7 @@ class AkshareDataUpdater(BaseDataUpdater):
         return stock_list_df["代码"].tolist()
 
     @retry(tries=3, delay=5)
-    def _single_download(self, stock_code: str, freq: str) -> pd.DataFrame:
+    def _single_download(self, stock_code: str, freq: str):
         if freq == "1D":
             stock_data_df = ak.stock_zh_a_hist(symbol=stock_code, adjust="hfq")
         elif freq == "1W":
@@ -60,7 +60,7 @@ class AkshareDataUpdater(BaseDataUpdater):
                 symbol=stock_code, period=freq.lower(), adjust="hfq"
             )
         else:
-            pass
+            raise ValueError(f"Invalid frequency: {freq}")
         if not stock_data_df.empty:
             stock_data_df = self._process_df(stock_data_df)
             self._insert_data(f"kline-{freq}", stock_data_df)

@@ -35,21 +35,15 @@ class AsyncBaseDataUpdater(ABC):
     # For MongoDB only
     async def check_index(self):
         """
-        Set up compound indexes for each collection in the MongoDB database.
+        Ensure indexes are set for time-series collections, focusing on any additional needs beyond time series defaults.
         """
         collections = await self.db.list_collection_names()
-        logger.info(collections)
+        logger.info(f"Existing collections: {collections}")
         for collection_name in collections:
             collection = self.db[collection_name]
-            # Check if the compound index exists, exclude the original index
             list_of_indexes = await collection.list_indexes().to_list(length=None)
-            if not any(
-                    index["key"] == [("orderbook_id", 1), ("timestamp", 1)]
-                    for index in list_of_indexes
-            ):
-                await collection.create_index(
-                    [("orderbook_id", 1), ("timestamp", 1)], unique=True
-                )
+            if not any(index["key"] == [("orderbook_id", 1), ("timestamp", 1)] for index in list_of_indexes):
+                await collection.create_index([("orderbook_id", 1), ("timestamp", 1)], unique=True)
                 logger.info(f"Created compound index for {collection_name}.")
             else:
                 logger.info(f"Compound index for {collection_name} already exists.")
@@ -60,6 +54,22 @@ class AsyncBaseDataUpdater(ABC):
             logger.info(f"Dropped database {self.db_name}.")
         else:
             logger.info("Skipping database drop.")
+
+    async def create_timeseries_collection(self, collection_name: str, time_field: str):
+        """
+        Create a time-series collection if it doesn't already exist.
+        """
+        collections = await self.db.list_collection_names()
+        if collection_name not in collections:
+            await self.db.create_collection(
+                collection_name,
+                timeseries={
+                    'timeField': time_field,
+                    'metaField': 'metadata',
+                    'granularity': 'seconds'
+                }
+            )
+            logger.info(f"Created time-series collection for {collection_name}.")
 
     async def start_session(self):
         if self.session is None or self.session.closed:
@@ -191,6 +201,8 @@ class AsyncBaseDataUpdater(ABC):
 
     async def main(self):
         await self.drop_db(refresh=False)
+        for bar_size in self.bar_sizes:
+            await self.create_timeseries_collection(f"kline-{bar_size}", 'timestamp')
         await self.check_index()
         await self.start_session()
         await self.initialize_update()

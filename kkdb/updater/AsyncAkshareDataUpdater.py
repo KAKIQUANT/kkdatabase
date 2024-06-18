@@ -68,15 +68,30 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
         async with self.semaphore:
             await self.fetch_and_process_data(stock_code, freq)
 
+    def download_data(stock_code, freq, start_date, end_date) -> pd.DataFrame:
+        if freq == "1m":
+            return ak.stock_zh_a_minute(symbol=stock_code, adjust="hfq", start_date=start_date, end_date=end_date)
+        elif freq == "1D":
+            return ak.stock_zh_a_hist(symbol=stock_code, period="daily", ajust="hfq", start_date=start_date, end_date=end_date)
+        elif freq == "1W":
+            return ak.stock_zh_a_hist(symbol=stock_code, period="weekly", adjust="hfq", start_date=start_date,
+                                      end_date=end_date)
+        elif freq == "1M":
+            return ak.stock_zh_a_hist(symbol=stock_code, period="monthly", adjust="hfq", start_date=start_date,
+                                      end_date=end_date)
+        else:
+            raise ValueError(f"Invalid frequency: {freq}")
+
     async def fetch_and_process_data(self, stock_code, freq):
         collection_name = f"kline-{freq}"
         earliest, latest = await self._get_existing_data_range(stock_code, collection_name)
-
         # Define the function to get data with time filtering
         def fetch_data():
             if earliest and latest:
-                return ak.stock_zh_a_hist(symbol=stock_code, adjust="hfq", start_date=latest, end_date=None)
-            return ak.stock_zh_a_hist(symbol=stock_code, adjust="hfq")
+                newer = download_data(stock_code, freq, latest, None)
+                older = download_data(stock_code, freq, None, earliest)
+                return pd.concat([older, newer])
+            return download_data(stock_code, freq, None, None)
 
         # Run the data fetching in an executor
         stock_data_df = await asyncio.get_event_loop().run_in_executor(None, fetch_data)
@@ -86,9 +101,8 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
             await self.insert_data(collection_name, processed_df)
     async def pool_download(self):
         tasks = []
-        bar_sizes = ["1D", "1W"]  # Define your required bar sizes
         for stock_code in self.stock_list:
-            for bar in bar_sizes:
+            for bar in self.bar_sizes:
                 task = asyncio.create_task(self._single_download(stock_code, bar))
                 tasks.append(task)
         await asyncio.gather(*tasks)
@@ -105,5 +119,5 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
 
 if __name__ == "__main__":
     client_str = "mongodb://10.201.8.215:27017"  # Make sure to define this
-    updater = AsyncAkshareDataUpdater(db_name="cn_stock", bar_sizes=["1D", "1W"], client_str=client_str)
+    updater = AsyncAkshareDataUpdater(db_name="cn_stock", bar_sizes=["1m", "1D", "1W","1M"], client_str=client_str)
     asyncio.run(updater.main(refresh=False))

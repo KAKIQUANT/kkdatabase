@@ -80,4 +80,4 @@ class AkshareDataUpdater(BaseDataUpdater):
 
 if __name__ == "__main__":
     updater = AkshareDataUpdater(db_name="cn_stock", bar_sizes=["1D", "1W"])
-    updater.main(refresh=True)
+    updater.main(refresh=False)

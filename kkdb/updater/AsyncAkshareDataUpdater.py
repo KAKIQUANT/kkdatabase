@@ -68,7 +68,7 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
         async with self.semaphore:
             await self.fetch_and_process_data(stock_code, freq)
 
-    def download_data(stock_code, freq, start_date, end_date) -> pd.DataFrame:
+    def download_data(self, stock_code, freq, start_date, end_date) -> pd.DataFrame:
         if freq == "1m":
             return ak.stock_zh_a_minute(symbol=stock_code, adjust="hfq", start_date=start_date, end_date=end_date)
         elif freq == "1D":

@@ -110,11 +110,11 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
     async def main(self, refresh: bool = False):
         await self.start_session()
         await self.drop_db(refresh=refresh)
-        await self.check_index()
+        # await self.check_index()
         await self.initialize_update()
         await self.pool_download()
         await self.close_session()
-        await self.check_index()
+        # await self.check_index()
 
 
 if __name__ == "__main__":

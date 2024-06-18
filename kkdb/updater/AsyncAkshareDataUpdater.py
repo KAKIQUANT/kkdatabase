@@ -6,13 +6,10 @@ from aiohttp import ClientSession
 from retry import retry
 from typing import Iterable
 import os
-
+from loguru import logger
 # 清除环境变量中的代理设置
 os.environ.pop('http_proxy', None)
 os.environ.pop('https_proxy', None)
-
-# 接下来是你的代码
-
 
 class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
     def __init__(

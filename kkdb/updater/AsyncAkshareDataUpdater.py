@@ -91,7 +91,7 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
                 newer = self.download_data(stock_code, freq, latest, None)
                 older = self.download_data(stock_code, freq, None, earliest)
                 return pd.concat([older, newer])
-            return download_data(stock_code, freq, None, None)
+            return self.download_data(stock_code, freq, None, None)
 
         # Run the data fetching in an executor
         stock_data_df = await asyncio.get_event_loop().run_in_executor(None, fetch_data)

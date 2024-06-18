@@ -107,14 +107,16 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
                 tasks.append(task)
         await asyncio.gather(*tasks)
 
-    async def main(self, refresh: bool = False):
+    async def main(self):
+        await self.drop_db(refresh=False)
+        for bar_size in self.bar_sizes:
+            await self.create_timeseries_collection(f"kline-{bar_size}", 'timestamp')
         await self.start_session()
-        await self.drop_db(refresh=refresh)
-        # await self.check_index()
+        logger.info("Starting data update...")
         await self.initialize_update()
         await self.pool_download()
         await self.close_session()
-        # await self.check_index()
+        logger.info("Data update completed.")
 
 
 if __name__ == "__main__":

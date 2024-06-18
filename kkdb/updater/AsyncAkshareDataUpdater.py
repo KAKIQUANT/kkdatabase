@@ -107,4 +107,4 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
 if __name__ == "__main__":
     client_str = "mongodb://10.201.8.215:27017"  # Make sure to define this
     updater = AsyncAkshareDataUpdater(db_name="cn_stock", bar_sizes=["1D", "1W"], client_str=client_str)
-    asyncio.run(updater.main(refresh=True))
+    asyncio.run(updater.main(refresh=False))

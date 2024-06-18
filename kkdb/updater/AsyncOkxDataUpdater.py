@@ -27,7 +27,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                 "1D",
                 "1W",
             ],
-            max_concurrent_requests: int = 3,
+            max_concurrent_requests: int = 10,
             client_str: str = get_client_str(),
             resolvers: AsyncResolver | None = None,
             proxy: str = None,

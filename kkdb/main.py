@@ -1,12 +1,8 @@
 import hydra
 from omegaconf import DictConfig
-import requests
 from loguru import logger
 import asyncio
 
-# Placeholder for your actual updater classes
-from kkdb.updater.AsyncOkxDataUpdater import AsyncOkxCandleUpdater
-from kkdb.updater.AsyncAkshareDataUpdater import AsyncAkshareDataUpdater
 from kkdb.tasks.async_task import update_crypto_data, update_cn_stock_data, update_all_data_sources
 from kkdb.tasks.sync_task import check_ip_address
 def run_async_main(cfg):

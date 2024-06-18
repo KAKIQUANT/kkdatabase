@@ -31,7 +31,7 @@ logger.add(
 @hydra.main(config_path="./configs", config_name="config", version_base="1.2")
 def main(cfg: DictConfig):
     # Initialize MongoDB connection using Hydra config
-    client = pymongo.MongoClient(cfg.db.connection_string)
+    client = pymongo.MongoClient(cfg.db.str)
     db = client[cfg.db.default_db]
 
     # App Title

@@ -203,11 +203,13 @@ class AsyncBaseDataUpdater(ABC):
         await self.drop_db(refresh=False)
         for bar_size in self.bar_sizes:
             await self.create_timeseries_collection(f"kline-{bar_size}", 'timestamp')
-        await self.check_index()
+        # await self.check_index()
         await self.start_session()
+        logger.info("Starting data update...")
         await self.initialize_update()
         await self.close_session()
-        await self.check_index()
+        logger.info("Data update completed.")
+        # await self.check_index()
 
 
 if __name__ == "__main__":

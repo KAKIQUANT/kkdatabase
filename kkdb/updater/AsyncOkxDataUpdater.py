@@ -66,11 +66,11 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
         return all_coin_pairs
 
     def _get_spot_instruments(self):
-        publicDataAPI = PublicData.PublicAPI(flag="0")
+        publicDataAPI = PublicData.PublicAPI(flag="0",proxy=self.proxy)
         return publicDataAPI.get_instruments(instType="SPOT")
 
     def _get_swap_instruments(self):
-        publicDataAPI = PublicData.PublicAPI(flag="0")
+        publicDataAPI = PublicData.PublicAPI(flag="0",proxy=self.proxy)
         return publicDataAPI.get_instruments(instType="SWAP")
 
     async def fetch_kline_data(

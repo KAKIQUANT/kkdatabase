@@ -8,7 +8,7 @@ from typing import Optional, Iterable, Tuple
 
 from numpy import signedinteger
 from numpy._typing import _64Bit
-from pymongo.errors import BulkWriteError
+from pymongo.errors import BulkWriteError, DuplicateKeyError
 from kkdb.utils.check_db import get_client_str
 from abc import ABC, abstractmethod
 
@@ -83,6 +83,8 @@ class AsyncBaseDataUpdater(ABC):
                 )
             except BulkWriteError:
                 logger.warning("Writing duplicate data encountered, skipping...")
+            except DuplicateKeyError:
+                logger.warning("Duplicate key encountered, skipping...")
             except Exception as e:
                 logger.error(f"Error inserting data: {e}")
         else:

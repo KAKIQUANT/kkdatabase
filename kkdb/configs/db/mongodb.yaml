@@ -5,7 +5,7 @@ password: ""
 
 db_name:
   crypto: "crypto"
-  cn_stock: "cn_share"
+  cn_stock: "cn_stock"
   us_share: "us_share"
   hk_share: "hk_share"
   fund: "fund"

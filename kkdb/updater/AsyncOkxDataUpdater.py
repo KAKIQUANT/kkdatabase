@@ -139,7 +139,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                         df[field] = pd.to_numeric(
                                             df[field], errors="coerce"
                                         )
-                                    df["instId"] = inst_id
+                                    df["orderbook_id"] = inst_id
                                     df["bar"] = bar
                                     # Make sure all timestamps in df is greater than collection_latest
                                     df = df[df["timestamp"] > datetime.fromtimestamp(collection_latest / 1000, tz=df["timestamp"].dt.tz)]

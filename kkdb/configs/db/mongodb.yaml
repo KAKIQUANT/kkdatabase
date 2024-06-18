@@ -4,7 +4,7 @@ username: ""
 password: ""
 
 db_name:
-  crypto: "crypto"
+  crypto: "crypto_okx"
   cn_stock: "cn_stock"
   us_share: "us_share"
   hk_share: "hk_share"

@@ -44,11 +44,11 @@ class AsyncBaseDataUpdater(ABC):
             # Check if the compound index exists, exclude the original index
             list_of_indexes = await collection.list_indexes().to_list(length=None)
             if not any(
-                    index["key"] == [("instId", 1), ("timestamp", 1)]
+                    index["key"] == [("orderbook_id", 1), ("timestamp", 1)]
                     for index in list_of_indexes
             ):
                 await collection.create_index(
-                    [("instId", 1), ("timestamp", 1)], unique=True
+                    [("orderbook_id", 1), ("timestamp", 1)], unique=True
                 )
                 logger.info(f"Created compound index for {collection_name}.")
             else:

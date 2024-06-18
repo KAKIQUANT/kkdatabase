@@ -27,7 +27,7 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
     async def _process_df(self, df: pd.DataFrame) -> pd.DataFrame:
         df.rename(
             columns={
-                "日期": "datetime",
+                "日期": "timestamp",
                 "股票代码": "orderbook_id",
                 "开盘": "open",
                 "收盘": "close",
@@ -42,8 +42,7 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
             },
             inplace=True
         )
-        df["datetime"] = pd.to_datetime(df["datetime"])
-        df["timestamp"] = df["datetime"]
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
         df = df.loc[:, ~df.columns.duplicated()]
         return df
 

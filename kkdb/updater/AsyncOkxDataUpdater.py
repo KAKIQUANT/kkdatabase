@@ -73,9 +73,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
         publicDataAPI = PublicData.PublicAPI(flag="0",proxy=self.proxy)
         return publicDataAPI.get_instruments(instType="SWAP")
 
-    async def fetch_kline_data(
-            self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
-    ):
+    async def fetch_kline_data(self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100):
         logger.info(f"Checking existing data for {inst_id} {bar}...")
         collection_earliest, collection_latest = await self.check_existing_data(inst_id, bar)
         latest_ts = await now_ts()
@@ -84,7 +82,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
 
         is_first_time = True
         # Fetch newer data until no more data is returned
-        while b > collection_latest:
+        while b > (collection_latest if collection_latest is not None else np.int64(0)):
             try:
                 params = {
                     "instId": inst_id,
@@ -105,7 +103,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                     logger.info(
                                         f"No more data to fetch or empty data returned for {inst_id}-{bar}."
                                     )
-                                    return None
+                                    return
                                 else:
                                     df = pd.DataFrame(
                                         result["data"],
@@ -143,7 +141,8 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                     df["orderbook_id"] = inst_id
                                     df["bar"] = bar
                                     # Make sure all timestamps in df is greater than collection_latest
-                                    df = df[df["timestamp"] > datetime.fromtimestamp(collection_latest / 1000, tz=df["timestamp"].dt.tz)]
+                                    if collection_latest is not None:
+                                        df = df[df["timestamp"] > pd.to_datetime(collection_latest, unit='ms', utc=True).tz_convert("Asia/Shanghai")]
                                     await self.insert_data(
                                         f"kline-{bar}", df
                                     )
@@ -159,10 +158,10 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                         self.time_interval = time_interval
                                         is_first_time = False
                                     b = (
-                                            a
-                                            - time_interval
-                                            - np.int64(4)
-                                            + np.int64(random.randint(1, 10) * 2)
+                                        a
+                                        - time_interval
+                                        - np.int64(4)
+                                        + np.int64(random.randint(1, 10) * 2)
                                     )
 
                             elif response.status == 429:
@@ -174,42 +173,59 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                 logger.error(
                                     f"Failed to fetch data with status code {response.status}"
                                 )
-                                return None
+                                return
 
             except Exception as e:
                 logger.error(f"Error occurred: {e}, Retrying...")
                 await asyncio.sleep(sleep_time)
 
         # Fetch data older than the existing data if any
-        a = collection_earliest
-        b = a - self.time_interval - np.int64(4) + np.int64(random.randint(1, 10) * 2)
-        while b > collection_earliest:
-            try:
-                params = {
-                    "instId": inst_id,
-                    "before": str(b),
-                    "after": str(a),
-                    "bar": bar,
-                    "limit": str(limit),
-                }
+        if collection_earliest is not None:
+            a = collection_earliest
+            b = a - self.time_interval - np.int64(4) + np.int64(random.randint(1, 10) * 2)
+            while b > collection_earliest:
+                try:
+                    params = {
+                        "instId": inst_id,
+                        "before": str(b),
+                        "after": str(a),
+                        "bar": bar,
+                        "limit": str(limit),
+                    }
 
-                async with self.semaphore:
-                    if self.session is not None:
-                        async with self.session.get(
-                                self.market_url, params=params, headers=self.headers, proxy=self.proxy
-                        ) as response:
-                            if response.status == 200:
-                                result = await response.json()
-                                if not result["data"]:
-                                    logger.info(
-                                        f"No more data to fetch or empty data returned for {inst_id}-{bar}."
-                                    )
-                                    return None
-                                else:
-                                    df = pd.DataFrame(
-                                        result["data"],
-                                        columns=[
-                                            "timestamp",
+                    async with self.semaphore:
+                        if self.session is not None:
+                            async with self.session.get(
+                                    self.market_url, params=params, headers=self.headers, proxy=self.proxy
+                            ) as response:
+                                if response.status == 200:
+                                    result = await response.json()
+                                    if not result["data"]:
+                                        logger.info(
+                                            f"No more data to fetch or empty data returned for {inst_id}-{bar}."
+                                        )
+                                        return
+                                    else:
+                                        df = pd.DataFrame(
+                                            result["data"],
+                                            columns=[
+                                                "timestamp",
+                                                "open",
+                                                "high",
+                                                "low",
+                                                "close",
+                                                "volume",
+                                                "volCcy",
+                                                "volCcyQuote",
+                                                "confirm",
+                                            ],
+                                        )
+                                        df["timestamp"] = pd.to_datetime(
+                                            df["timestamp"].values.astype(np.int64),
+                                            unit="ms",
+                                            utc=True,
+                                        ).tz_convert("Asia/Shanghai")
+                                        numeric_fields = [
                                             "open",
                                             "high",
                                             "low",
@@ -218,60 +234,45 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                             "volCcy",
                                             "volCcyQuote",
                                             "confirm",
-                                        ],
-                                    )
-                                    df["timestamp"] = pd.to_datetime(
-                                        df["timestamp"].values.astype(np.int64),
-                                        unit="ms",
-                                        utc=True,
-                                    ).tz_convert("Asia/Shanghai")
-                                    numeric_fields = [
-                                        "open",
-                                        "high",
-                                        "low",
-                                        "close",
-                                        "volume",
-                                        "volCcy",
-                                        "volCcyQuote",
-                                        "confirm",
-                                    ]
-                                    for field in numeric_fields:
-                                        df[field] = pd.to_numeric(
-                                            df[field], errors="coerce"
-                                        )
-                                    df["instId"] = inst_id
-                                    df["bar"] = bar
-                                    # Make sure all timestamps in df is less than collection_earliest
-                                    df = df[df["timestamp"] < collection_earliest]
+                                        ]
+                                        for field in numeric_fields:
+                                            df[field] = pd.to_numeric(
+                                                df[field], errors="coerce"
+                                            )
+                                        df["orderbook_id"] = inst_id
+                                        df["bar"] = bar
+                                        # Make sure all timestamps in df is less than collection_earliest
+                                        df = df[df["timestamp"] < pd.to_datetime(collection_earliest, unit='ms', utc=True).tz_convert("Asia/Shanghai")]
 
-                                    await self.insert_data_to_mongodb(
-                                        f"kline-{bar}", df
-                                    )  # Adjust as per your actual method signature
-                                    logger.debug(
-                                        f"Successfully inserted data for {inst_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
-                                    )
-                                    a = np.int64(result["data"][-1][0]) - np.int64(1)
-                                    b = (
+                                        await self.insert_data(
+                                            f"kline-{bar}", df
+                                        )
+                                        logger.debug(
+                                            f"Successfully inserted data for {inst_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
+                                        )
+                                        a = np.int64(result["data"][-1][0]) - np.int64(1)
+                                        b = (
                                             a
-                                            - time_interval
+                                            - self.time_interval
                                             - np.int64(4)
                                             + np.int64(random.randint(1, 10) * 2)
+                                        )
+
+                                elif response.status == 429:
+                                    logger.debug(
+                                        f"Too many requests for {bar} - {inst_id}."
                                     )
 
-                            elif response.status == 429:
-                                logger.debug(
-                                    f"Too many requests for {bar} - {inst_id}."
-                                )
+                                else:
+                                    logger.error(
+                                        f"Failed to fetch data with status code {response.status}"
+                                    )
+                                    return
 
-                            else:
-                                logger.error(
-                                    f"Failed to fetch data with status code {response.status}"
-                                )
-                                return None
+                except Exception as e:
+                    logger.error(f"Error occurred: {e}, Retrying...")
+                    await asyncio.sleep(sleep_time)
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}, Retrying...")
-                await asyncio.sleep(sleep_time)
 
     async def initialize_update(self):
         # List of restaurants could be big, think in promise of plying across the sums as detailed.

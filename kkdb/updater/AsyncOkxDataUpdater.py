@@ -73,9 +73,12 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
         publicDataAPI = PublicData.PublicAPI(flag="0",proxy=self.proxy)
         return publicDataAPI.get_instruments(instType="SWAP")
 
-    async def fetch_kline_data(self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100):
-        logger.info(f"Checking existing data for {inst_id} {bar}...")
-        collection_earliest, collection_latest = await self.check_existing_data(inst_id, bar)
+    async def fetch_kline_data(self, orderbook_id: str, bar: str, sleep_time: int = 1, limit: int = 100):
+        if orderbook_id not in self.timestamp_dict or bar not in self.timestamp_dict[orderbook_id]:
+            logger.error(f"Timestamps not initialized for {orderbook_id} {bar}")
+            return
+
+        collection_earliest, collection_latest = self.timestamp_dict[orderbook_id][bar]
         latest_ts = await now_ts()
         a = latest_ts
         b: np.int64 = a
@@ -85,7 +88,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
         while b > (collection_latest if collection_latest is not None else np.int64(0)):
             try:
                 params = {
-                    "instId": inst_id,
+                    "instId": orderbook_id,
                     "before": "" if is_first_time else str(b),
                     "after": str(a),
                     "bar": bar,
@@ -101,7 +104,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                 result = await response.json()
                                 if not result["data"]:
                                     logger.info(
-                                        f"No more data to fetch or empty data returned for {inst_id}-{bar}."
+                                        f"No more data to fetch or empty data returned for {orderbook_id}-{bar}."
                                     )
                                     return
                                 else:
@@ -138,16 +141,18 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                         df[field] = pd.to_numeric(
                                             df[field], errors="coerce"
                                         )
-                                    df["orderbook_id"] = inst_id
+                                    df["orderbook_id"] = orderbook_id
                                     df["bar"] = bar
                                     # Make sure all timestamps in df is greater than collection_latest
                                     if collection_latest is not None:
                                         df = df[df["timestamp"] > pd.to_datetime(collection_latest, unit='ms', utc=True).tz_convert("Asia/Shanghai")]
+                                    if df.empty:
+                                        continue
                                     await self.insert_data(
                                         f"kline-{bar}", df
                                     )
                                     logger.debug(
-                                        f"Successfully inserted data for {inst_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
+                                        f"Successfully inserted data for {orderbook_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
                                     )
                                     a = np.int64(result["data"][-1][0]) - np.int64(1)
 
@@ -166,7 +171,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
 
                             elif response.status == 429:
                                 logger.debug(
-                                    f"Too many requests for {bar} - {inst_id}."
+                                    f"Too many requests for {bar} - {orderbook_id}."
                                 )
 
                             else:
@@ -186,7 +191,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
             while b > collection_earliest:
                 try:
                     params = {
-                        "instId": inst_id,
+                        "instId": orderbook_id,
                         "before": str(b),
                         "after": str(a),
                         "bar": bar,
@@ -202,7 +207,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                     result = await response.json()
                                     if not result["data"]:
                                         logger.info(
-                                            f"No more data to fetch or empty data returned for {inst_id}-{bar}."
+                                            f"No more data to fetch or empty data returned for {orderbook_id}-{bar}."
                                         )
                                         return
                                     else:
@@ -239,7 +244,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                             df[field] = pd.to_numeric(
                                                 df[field], errors="coerce"
                                             )
-                                        df["orderbook_id"] = inst_id
+                                        df["orderbook_id"] = orderbook_id
                                         df["bar"] = bar
                                         # Make sure all timestamps in df is less than collection_earliest
                                         df = df[df["timestamp"] < pd.to_datetime(collection_earliest, unit='ms', utc=True).tz_convert("Asia/Shanghai")]
@@ -248,7 +253,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
                                             f"kline-{bar}", df
                                         )
                                         logger.debug(
-                                            f"Successfully inserted data for {inst_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
+                                            f"Successfully inserted data for {orderbook_id} {bar} from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}."
                                         )
                                         a = np.int64(result["data"][-1][0]) - np.int64(1)
                                         b = (
@@ -260,7 +265,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
 
                                 elif response.status == 429:
                                     logger.debug(
-                                        f"Too many requests for {bar} - {inst_id}."
+                                        f"Too many requests for {bar} - {orderbook_id}."
                                     )
 
                                 else:
@@ -275,23 +280,31 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
 
 
     async def initialize_update(self):
-        # List of restaurants could be big, think in promise of plying across the sums as detailed.
+        # List of coin pairs could be big, think in promise of plying across the sums as detailed.
         coin_pairs = await self._get_all_coin_pairs(filter="USDT")
         logger.info(
             f"Fetching data for {len(coin_pairs)} coin pairs.\n Pairs: {coin_pairs}"
         )
         bar_sizes = self.bar_sizes
-        tasks = []
-        for inst_id in coin_pairs:
-            for bar in bar_sizes:
-                tasks.append(asyncio.create_task(self.fetch_kline_data(inst_id, bar)))
-        await asyncio.gather(*tasks)
+
+        # Create tasks to fetch timestamps for all orderbook_id and bar combinations concurrently
+        timestamp_tasks = [
+            asyncio.create_task(self.initialize_timestamps(orderbook_id, bar_sizes))
+            for orderbook_id in coin_pairs
+        ]
+        await asyncio.gather(*timestamp_tasks)
+
+        # Create tasks to fetch kline data for all orderbook_id and bar combinations concurrently
+        data_tasks = [
+            asyncio.create_task(self.fetch_kline_data(orderbook_id, bar))
+            for orderbook_id in coin_pairs
+            for bar in bar_sizes
+        ]
+        await asyncio.gather(*data_tasks)
+
 
 
 
 if __name__ == "__main__":
-    updater = AsyncOkxCandleUpdater(db_name="crypto")
-    # Check conpound index
-    # asyncio.run(updater.check_index())
-    inst_id, bar = "BTC-USDT-SWAP", "1m"
-    asyncio.run(updater.check_existing_data(inst_id, bar))
+    updater = AsyncOkxCandleUpdater(db_name="crypto_okx", client_str="mongodb://10.201.8.215:27017", proxy="http://10.201.8.104:18443")
+    asyncio.run(updater.main())

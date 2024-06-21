@@ -113,7 +113,7 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
 
     async def fetch_and_process_data(self, stock_code, freq):
         collection_name = f"kline-{freq}"
-        earliest, latest = await self._get_existing_data_range(
+        earliest, latest = await self.check_existing_data(
             stock_code, collection_name
         )
 
@@ -145,11 +145,13 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
         await self.drop_db(refresh=False)
         for bar_size in self.bar_sizes:
             await self.create_timeseries_collection(f"kline-{bar_size}", "timestamp")
+        await self.create_secondary_index()
         await self.start_session()
         logger.info("Starting data update...")
         await self.initialize_update()
         await self.pool_download()
         await self.close_session()
+        await self.create_secondary_index()
         logger.info("Data update completed.")
 
 

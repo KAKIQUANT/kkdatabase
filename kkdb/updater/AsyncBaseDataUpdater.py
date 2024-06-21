@@ -117,28 +117,32 @@ class AsyncBaseDataUpdater(ABC):
         Returns the earliest and latest timestamps in milliseconds.
         """
         collection = self.db[f"kline-{bar}"]
-        pipeline = [
-            {"$match": {"orderbook_id": orderbook_id}},
-            {"$group": {
-                "_id": None,
-                "earliest": {"$min": "$timestamp"},
-                "latest": {"$max": "$timestamp"}
-            }}
-        ]
-        result = await collection.aggregate(pipeline).to_list(length=1)
-        if result:
-            earliest_timestamp = result[0]["earliest"]
-            latest_timestamp = result[0]["latest"]
-        else:
-            earliest_timestamp = latest_timestamp = None
+
+        # Fetch the earliest timestamp
+        earliest_doc = await collection.find_one(
+            {"orderbook_id": orderbook_id},
+            sort=[("timestamp", 1)],
+            projection={"timestamp": 1}
+        )
+        earliest_timestamp = earliest_doc["timestamp"] if earliest_doc else None
+
+        # Fetch the latest timestamp
+        latest_doc = await collection.find_one(
+            {"orderbook_id": orderbook_id},
+            sort=[("timestamp", -1)],
+            projection={"timestamp": 1}
+        )
+        latest_timestamp = latest_doc["timestamp"] if latest_doc else None
 
         logger.debug(
             f"Found existing data for {orderbook_id} {bar} start from {earliest_timestamp} to end {latest_timestamp}."
         )
+
         return (
             np.int64(earliest_timestamp.timestamp() * 1000) if earliest_timestamp else None,
             np.int64(latest_timestamp.timestamp() * 1000) if latest_timestamp else None
         )
+
 
 
     async def check_missing_data(self, orderbook_id: str, bar: str) -> bool:

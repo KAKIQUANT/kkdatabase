@@ -120,11 +120,11 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
         # Define the function to get data with time filtering
         def fetch_data():
             if earliest is not None and latest is not None:
-                newer = self.download_data(stock_code, freq, start_date=latest)
-                older = self.download_data(stock_code, freq, end_date=earliest)
+                newer = self.download_data(stock_code, freq, start_date=latest, end_date="20500101")
+                older = self.download_data(stock_code, freq, start_date="19700101", end_date=earliest)
                 return pd.concat([older, newer])
             else:
-                return self.download_data(stock_code, freq)
+                return self.download_data(stock_code, freq, start_date="19700101", end_date="20500101")
 
         # Run the data fetching in an executor
         stock_data_df = await asyncio.get_event_loop().run_in_executor(None, fetch_data)

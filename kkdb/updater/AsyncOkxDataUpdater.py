@@ -76,6 +76,7 @@ class AsyncOkxCandleUpdater(AsyncBaseDataUpdater):
     async def fetch_kline_data(
             self, inst_id: str, bar: str, sleep_time: int = 1, limit: int = 100
     ):
+        logger.info(f"Checking existing data for {inst_id} {bar}...")
         collection_earliest, collection_latest = await self.check_existing_data(inst_id, bar)
         latest_ts = await now_ts()
         a = latest_ts

@@ -32,22 +32,6 @@ class AsyncBaseDataUpdater(ABC):
         self.resolver: aiohttp.AsyncResolver | None = resolvers
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
 
-    # For MongoDB only
-    async def check_index(self):
-        """
-        Ensure indexes are set for time-series collections, focusing on any additional needs beyond time series defaults.
-        """
-        collections = await self.db.list_collection_names()
-        logger.info(f"Existing collections: {collections}")
-        for collection_name in collections:
-            collection = self.db[collection_name]
-            list_of_indexes = await collection.list_indexes().to_list(length=None)
-            if not any(index["key"] == [("orderbook_id", 1), ("timestamp", 1)] for index in list_of_indexes):
-                await collection.create_index([("orderbook_id", 1), ("timestamp", 1)], unique=True)
-                logger.info(f"Created compound index for {collection_name}.")
-            else:
-                logger.info(f"Compound index for {collection_name} already exists.")
-
     async def drop_db(self, refresh: bool = False):
         if refresh:
             await self.client.drop_database(name_or_database=self.db_name)
@@ -100,81 +84,55 @@ class AsyncBaseDataUpdater(ABC):
         else:
             logger.info(f"No new data to insert into {collection_name}.")
 
-    async def check_existing_data(self, inst_id: str, bar: str) -> tuple[np.int64, np.int64]:
+    async def check_existing_data(self, inst_id: str, bar: str) -> Tuple[Optional[np.int64], Optional[np.int64]]:
         """
-        Finds the latest timestamp in the MongoDB collection.
+        Finds the earliest and latest timestamps in the MongoDB collection for the given instrument and bar.
         Returns the earliest and latest timestamps in milliseconds.
         """
         collection = self.db[f"kline-{bar}"]
-        latest_doc = (
-            collection.find({"instId": inst_id}, {"timestamp": 1})
-            .sort("timestamp", -1)
-            .limit(1)
-        )
-        latest_timestamp = await latest_doc.to_list(length=1)
-        latest_timestamp = (
-            latest_timestamp[0]["timestamp"] if latest_timestamp else None
-        )
-        earliest_doc = (
-            collection.find({"instId": inst_id}, {"timestamp": 1})
-            .sort("timestamp", 1)
-            .limit(1)
-        )
-        earliest_timestamp = await earliest_doc.to_list(length=1)
-        earliest_timestamp = (
-            earliest_timestamp[0]["timestamp"] if earliest_timestamp else None
-        )
+        pipeline = [
+            {"$match": {"instId": inst_id}},
+            {"$group": {
+                "_id": None,
+                "earliest": {"$min": "$timestamp"},
+                "latest": {"$max": "$timestamp"}
+            }}
+        ]
+        result = await collection.aggregate(pipeline).to_list(length=1)
+        if result:
+            earliest_timestamp = result[0]["earliest"]
+            latest_timestamp = result[0]["latest"]
+        else:
+            earliest_timestamp = latest_timestamp = None
 
         logger.debug(
             f"Found existing data for {inst_id} {bar} start from {earliest_timestamp} to end {latest_timestamp}."
         )
-        # Convert datetime timestamp to timestamp in milliseconds in np.int64 format
         return (
-            np.int64(earliest_timestamp.timestamp() * 1000)
-            if earliest_timestamp
-            else np.int64(0)
-            ,
-            np.int64(latest_timestamp.timestamp() * 1000)
-            if latest_timestamp
-            else np.int64(0)
+            np.int64(earliest_timestamp.timestamp() * 1000) if earliest_timestamp else None,
+            np.int64(latest_timestamp.timestamp() * 1000) if latest_timestamp else None
         )
 
-    async def check_missing_data(self, inst_id, bar):
+    async def check_missing_data(self, inst_id: str, bar: str) -> bool:
         """
         Checks if there is missing data in the MongoDB collection.
         """
         collection = self.db[f"kline-{bar}"]
-        latest_doc = collection.find({"instId": inst_id}, {"timestamp": 1}).sort(
-            "timestamp", -1
-        )
-        # Get all of them and convert to pd.DataFrame
-        df = pd.DataFrame(await latest_doc.to_list(length=None))
-        # Check the timeseries is continuous
-        return df["timestamp"].diff().dt.total_seconds().dropna().eq(60).all()
+        pipeline = [
+            {"$match": {"instId": inst_id}},
+            {"$sort": {"timestamp": 1}},
+            {"$group": {
+                "_id": None,
+                "timestamps": {"$push": "$timestamp"}
+            }}
+        ]
+        result = await collection.aggregate(pipeline).to_list(length=1)
+        if result:
+            timestamps = pd.Series(result[0]["timestamps"])
+            continuous = timestamps.diff().dt.total_seconds().dropna().eq(60).all()
+            return continuous
+        return True
 
-    async def fix_missing_data(self, inst_id, bar):
-        """
-        Fixes missing data in the MongoDB collection.
-        """
-        collection = self.db[f"kline-{bar}"]
-        latest_doc = collection.find({"instId": inst_id}, {"timestamp": 1}).sort(
-            "timestamp", -1
-        )
-        # Get all of them and convert to pd.DataFrame
-        df = pd.DataFrame(await latest_doc.to_list(length=None))
-        # Check the timeseries is continuous
-        if not df["timestamp"].diff().dt.total_seconds().dropna().eq(60).all():
-            # Get the missing timestamps
-            missing_ts = pd.date_range(
-                start=df["timestamp"].min(), end=df["timestamp"].max(), freq="1min"
-            ).difference(df["timestamp"])
-            # Create a new DataFrame with the missing timestamps
-            missing_df = pd.DataFrame({"timestamp": missing_ts})
-            # Insert the missing data into the collection
-            await self.insert_data_to_mongodb(f"kline-{bar}", missing_df)
-            logger.info(
-                f"Inserted {len(missing_df)} missing records into {inst_id} {bar}."
-            )
 
     async def fetch_one(
             self, inst_id: str, bar: str, before: np.int64, after: np.int64, limit: int
@@ -203,13 +161,11 @@ class AsyncBaseDataUpdater(ABC):
         await self.drop_db(refresh=False)
         for bar_size in self.bar_sizes:
             await self.create_timeseries_collection(f"kline-{bar_size}", 'timestamp')
-        # await self.check_index()
         await self.start_session()
         logger.info("Starting data update...")
         await self.initialize_update()
         await self.close_session()
         logger.info("Data update completed.")
-        # await self.check_index()
 
 
 if __name__ == "__main__":

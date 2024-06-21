@@ -55,6 +55,24 @@ class AsyncBaseDataUpdater(ABC):
             )
             logger.info(f"Created time-series collection for {collection_name}.")
 
+    async def create_secondary_index(self):
+        """
+        Create a compound index for orderbook_id and timestamp in all kline collections.
+        """
+        collections = await self.db.list_collection_names()
+        for collection_name in collections:
+            if collection_name.startswith("kline-"):
+                collection = self.db[collection_name]
+                # Check if the compound index already exists
+                indexes = await collection.index_information()
+                if not any(
+                        index['key'] == [('instId', 1), ('timestamp', 1)] for index in indexes.values()
+                ):
+                    await collection.create_index([("instId", 1), ("timestamp", 1)], unique=True)
+                    logger.info(f"Created compound index for {collection_name}.")
+                else:
+                    logger.info(f"Compound index already exists for {collection_name}.")
+
     async def start_session(self):
         if self.session is None or self.session.closed:
             timeout = aiohttp.ClientTimeout(total=10)
@@ -161,11 +179,13 @@ class AsyncBaseDataUpdater(ABC):
         await self.drop_db(refresh=False)
         for bar_size in self.bar_sizes:
             await self.create_timeseries_collection(f"kline-{bar_size}", 'timestamp')
+        await self.create_secondary_index()
         await self.start_session()
         logger.info("Starting data update...")
         await self.initialize_update()
         await self.close_session()
         logger.info("Data update completed.")
+        await self.create_secondary_index()
 
 
 if __name__ == "__main__":

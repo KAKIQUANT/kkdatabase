@@ -127,7 +127,7 @@ class AsyncAkshareDataUpdater(AsyncBaseDataUpdater):
 
         # Run the data fetching in an executor
         stock_data_df = await asyncio.get_event_loop().run_in_executor(None, fetch_data)
-
+        logger.info(f"Downloaded {len(stock_data_df)} records for {stock_code} {freq}.")
         if not stock_data_df.empty:
             processed_df = await self._process_df(stock_data_df)
             await self.insert_data(collection_name, processed_df)
